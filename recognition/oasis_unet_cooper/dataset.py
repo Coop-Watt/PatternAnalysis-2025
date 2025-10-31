@@ -1,104 +1,80 @@
-import os
-import glob
+import os, glob
 import numpy as np
-import nibabel as nib
 import torch
 from torch.utils.data import Dataset
-import random
 
-def normalize_img(x: np.ndarray, eps=1e-6):
-    x = x.astype(np.float32)
-    mean = x.mean()
-    std = x.std()
-    if std < eps:
-        std = 1.0
-    return (x - mean) / std
+_try_pil = None
+_try_nib = None
 
-def to_channels(arr: np.ndarray, num_classes: int, dtype=np.uint8):
-    # assumes labels are 0..C-1
-    h, w = arr.shape
-    out = np.zeros((num_classes, h, w), dtype=dtype)
-    for c in range(num_classes):
-        out[c] = (arr == c).astype(dtype)
-    return out
+def _load_png(path):
+    global _try_pil
+    if _try_pil is None:
+        from PIL import Image
+        _try_pil = Image
+    img = _try_pil.open(path).convert("L")
+    return np.array(img, dtype=np.float32)
+
+def _load_nifti(path):
+    global _try_nib
+    if _try_nib is None:
+        import nibabel as nib
+        _try_nib = nib
+    arr = _try_nib.load(path).get_fdata(caching='unchanged')
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    return arr.astype(np.float32)
+
+def _discover_pairs(images_dir, labels_dir):
+    pngs = sorted(glob.glob(os.path.join(images_dir, "*.png")))
+    if pngs:
+        lbls = [os.path.join(labels_dir, os.path.basename(p)) for p in pngs]
+        return list(zip(pngs, lbls)), "png"
+    niis = sorted(glob.glob(os.path.join(images_dir, "*.nii"))) + \
+           sorted(glob.glob(os.path.join(images_dir, "*.nii.gz")))
+    if niis:
+        lbls = [os.path.join(labels_dir, os.path.basename(p)) for p in niis]
+        return list(zip(niis, lbls)), "nifti"
+    raise FileNotFoundError(f"No .png or .nii(.gz) files under {images_dir}")
 
 class NiftiSeg2DDataset(Dataset):
-    """
-    Expects parallel directory structure:
-      images_dir/*.nii.gz
-      labels_dir/*.nii.gz
-    Matching is by sorted filename order. Adjust as needed.
-
-    Returns tensors:
-      image: (1, H, W)
-      mask : (H, W) long (class ids) OR one-hot (C, H, W) if one_hot=True
-    """
-    def __init__(self, images_dir, labels_dir, split="train",
-                 split_seed=1337, val_split=0.15, test_split=0.15,
-                 one_hot=False, num_classes=4, augment=True):
-        self.images = sorted(glob.glob(os.path.join(images_dir, "*.nii*")))
-        self.labels = sorted(glob.glob(os.path.join(labels_dir, "*.nii*")))
-        assert len(self.images) == len(self.labels) and len(self.images) > 0, "No pairs found"
-        self.one_hot = one_hot
+    def __init__(self, images_dir, labels_dir, augment=False, num_classes=2, focus_label=None):
+        self.pairs, self.mode = _discover_pairs(images_dir, labels_dir)
+        self.augment = augment
         self.num_classes = num_classes
-        self.augment = augment if split == "train" else False
-
-        # split
-        idxs = list(range(len(self.images)))
-        random.Random(split_seed).shuffle(idxs)
-        n = len(idxs)
-        n_test = int(n * test_split)
-        n_val  = int(n * val_split)
-        test_idx = idxs[:n_test]
-        val_idx  = idxs[n_test:n_test+n_val]
-        train_idx= idxs[n_test+n_val:]
-
-        if split == "train":
-            self.idxs = train_idx
-        elif split == "val":
-            self.idxs = val_idx
-        else:
-            self.idxs = test_idx
+        self.focus_label = focus_label
 
     def __len__(self):
-        return len(self.idxs)
+        return len(self.pairs)
 
-    def _maybe_augment(self, img, mask):
-        # simple flips
-        import numpy as np
-        if random.random() < 0.5:
-            img = np.flip(img, axis=1)
-            mask = np.flip(mask, axis=1)
-        if random.random() < 0.5:
-            img = np.flip(img, axis=0)
-            mask = np.flip(mask, axis=0)
-        return img, mask
+    def _load(self, ipath, lpath):
+        if self.mode == "png":
+            img = _load_png(ipath)
+            lbl = _load_png(lpath).astype(np.uint8)
+            if lbl.max() > 1:  # common OASIS: 0/255 → 0/1
+                lbl = (lbl > 0).astype(np.int64)
+        else:
+            img = _load_nifti(ipath)
+            lbl = _load_nifti(lpath).astype(np.int64)
+        return img, lbl
 
-    def __getitem__(self, i):
-        real_i = self.idxs[i]
-        img_nii = nib.load(self.images[real_i])
-        lbl_nii = nib.load(self.labels[real_i])
+    def __getitem__(self, idx):
+        ipath, lpath = self.pairs[idx]
+        img, lbl = self._load(ipath, lpath)
 
-        img = img_nii.get_fdata(caching='unchanged')
-        lbl = lbl_nii.get_fdata(caching='unchanged')
+        if self.focus_label is not None:
+            lbl = (lbl == int(self.focus_label)).astype(np.int64)
 
-        # handle [H,W] or [H,W,1]
-        if img.ndim == 3:
-            img = img[..., 0]
-        if lbl.ndim == 3:
-            lbl = lbl[..., 0]
-
-        img = normalize_img(img)
-        lbl = lbl.astype(np.int64)
+        m, s = float(img.mean()), float(img.std()) + 1e-8
+        img = (img - m) / s
 
         if self.augment:
-            img, lbl = self._maybe_augment(img, lbl)
+            if np.random.rand() < 0.5:
+                img = np.flip(img, 1).copy()
+                lbl = np.flip(lbl, 1).copy()
+            if np.random.rand() < 0.5:
+                img = np.flip(img, 0).copy()
+                lbl = np.flip(lbl, 0).copy()
 
-        # to tensors
-        img_t = torch.from_numpy(img).unsqueeze(0).float()  # (1,H,W)
-        if self.one_hot:
-            mask = to_channels(lbl, self.num_classes, dtype=np.uint8)  # (C,H,W)
-            mask_t = torch.from_numpy(mask).float()
-        else:
-            mask_t = torch.from_numpy(lbl).long()  # (H,W)
-        return img_t, mask_t
+        img = np.ascontiguousarray(img[None, ...].astype(np.float32))  # [1,H,W]
+        lbl = np.ascontiguousarray(lbl.astype(np.int64))  # [H,W]
+        return torch.from_numpy(img), torch.from_numpy(lbl)
