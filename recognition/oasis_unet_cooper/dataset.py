@@ -19,7 +19,7 @@ def _load_nifti(path):
     if _try_nib is None:
         import nibabel as nib
         _try_nib = nib
-    arr = _try_nib.load(path).get_fdata(caching='unchanged')
+    arr = _try_nib.load(path).get_fdata()
     if arr.ndim == 3:
         arr = arr[..., 0]
     return arr.astype(np.float32)
@@ -37,7 +37,9 @@ def _discover_pairs(images_dir, labels_dir):
     raise FileNotFoundError(f"No .png or .nii(.gz) files under {images_dir}")
 
 class NiftiSeg2DDataset(Dataset):
-    def __init__(self, images_dir, labels_dir, augment=False, num_classes=2, focus_label=None):
+    def __init__(self, images_dir, labels_dir,
+                 split=None, val_split=None, test_split=None,
+                 augment=False, num_classes=2, focus_label=None, **kwargs):
         self.pairs, self.mode = _discover_pairs(images_dir, labels_dir)
         self.augment = augment
         self.num_classes = num_classes
