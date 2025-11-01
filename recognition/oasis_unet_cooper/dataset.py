@@ -6,6 +6,28 @@ from torch.utils.data import Dataset
 _try_pil = None
 _try_nib = None
 
+# NEW: tolerant matcher — handles ".nii.png" images vs ".png"/"_seg.png"/"_mask.png" labels
+def _find_label_for_image(img_basename: str, labels_dir: str) -> str:
+    base = img_basename
+    # If image is "name.nii.png", normalise to "name.png"
+    if base.endswith(".nii.png"):
+        base_core = base[:-8] + ".png"   # drop ".nii", keep ".png"
+    else:
+        base_core = base
+
+    candidates = [
+        os.path.join(labels_dir, base_core),                              # e.g., case_001_slice_0.png
+        os.path.join(labels_dir, base),                                   # exact (in case labels also have .nii.png)
+        os.path.join(labels_dir, base_core.replace(".png", "_seg.png")),  # ..._seg.png
+        os.path.join(labels_dir, base_core.replace(".png", "_mask.png")), # ..._mask.png
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    raise FileNotFoundError(
+        f"Missing label for {img_basename}: tried -> " + ", ".join(candidates)
+    )
+
 def _load_png(path):
     global _try_pil
     if _try_pil is None:
@@ -24,27 +46,8 @@ def _load_nifti(path):
         arr = arr[..., 0]
     return arr.astype(np.float32)
 
-def _find_label_for_image(img_basename, labels_dir):
-    """
-    Try common variants so images like '...nii.png' can match labels named '...png' (etc.).
-    """
-    cands = []
-    # exact
-    cands.append(os.path.join(labels_dir, img_basename))
-    # .nii.png -> .png
-    if img_basename.endswith(".nii.png"):
-        cands.append(os.path.join(labels_dir, img_basename.replace(".nii.png", ".png")))
-    # add _seg / _mask forms
-    stem_png = img_basename.replace(".nii.png", ".png")
-    cands.append(os.path.join(labels_dir, stem_png.replace(".png", "_seg.png")))
-    cands.append(os.path.join(labels_dir, stem_png.replace(".png", "_mask.png")))
-
-    for lp in cands:
-        if os.path.exists(lp):
-            return lp
-    raise FileNotFoundError(f"Missing label for {img_basename}: tried -> " + ", ".join(cands))
-
 def _discover_pairs(images_dir, labels_dir):
+    # PNG path
     pngs = sorted(glob.glob(os.path.join(images_dir, "*.png")))
     if pngs:
         pairs = []
@@ -53,11 +56,14 @@ def _discover_pairs(images_dir, labels_dir):
             lp = _find_label_for_image(b, labels_dir)
             pairs.append((ip, lp))
         return pairs, "png"
+
+    # NIfTI path
     niis = sorted(glob.glob(os.path.join(images_dir, "*.nii"))) + \
            sorted(glob.glob(os.path.join(images_dir, "*.nii.gz")))
     if niis:
         lbls = [os.path.join(labels_dir, os.path.basename(p)) for p in niis]
         return list(zip(niis, lbls)), "nifti"
+
     raise FileNotFoundError(f"No .png or .nii(.gz) files under {images_dir}")
 
 class NiftiSeg2DDataset(Dataset):
