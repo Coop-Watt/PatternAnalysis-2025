@@ -10,3 +10,5 @@ n/n# Backup files
 
 # Slurm logs
 slurm_*.out
+\n*.bak*\n
+
