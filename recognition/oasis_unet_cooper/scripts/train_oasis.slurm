@@ -1,9 +1,9 @@
 #!/bin/bash
+#SBATCH --account=comp3710
 #SBATCH --job-name=oasis_unet_png
-#SBATCH --partition=a100
+#SBATCH --partition=comp3710
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=12G
 #SBATCH --time=08:00:00
 #SBATCH -o slurm_%j.out
 

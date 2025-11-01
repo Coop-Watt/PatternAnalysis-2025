@@ -48,8 +48,8 @@ def evaluate(model, loader, device, num_classes):
             iou_pc  = iou_from_logits(logits, masks, num_classes=num_classes) # (C,)
 
             total_loss += loss.item() * imgs.size(0)
-            dice_accum.append(dice_pc.cpu().numpy())
-            iou_accum.append(iou_pc.cpu().numpy())
+            dice_accum.append(dice_pc)
+            iou_accum.append(iou_pc)
 
     n = len(loader.dataset)
     loss_avg = total_loss / max(n, 1)
