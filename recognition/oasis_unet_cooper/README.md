@@ -1,67 +1,167 @@
 # OASIS 2D Brain Segmentation with U-Net (PyTorch)
 
-**Goal:** Solve the Easy-difficulty task: *Segment the 2D OASIS brain dataset* with a 2D U‑Net (or Improved U‑Net) such that **all labels have Dice ≥ 0.90** on the held-out test split.
+**Goal (Easy):** Segment the OASIS **2D PNG slices** with a 2D U-Net so that **all labels achieve Dice ≥ 0.90 on the held-out test split** (classes: background, brain).
 
-This repository folder is structured for direct inclusion under `recognition/` in the PatternAnalysis-2025 repo.
-
----
-
-## How it works (overview)
-- **Model:** A clean 2D U‑Net with batch norm + dropout; configurable channels and depth.
-- **Data:** NIfTI images and labels (2D slices). Normalization per-slice; optional on‑the‑fly class-channel conversion.
-- **Training:** Cross‑entropy + soft Dice loss; cosine LR annealing; early stopping by validation Dice; mixed precision for speed (if CUDA).
-- **Evaluation:** Per-class and mean Dice/IoU; training curves saved to `runs/`.
+This folder is designed to live at:  
+`recognition/oasis_unet_cooper/` inside the **PatternAnalysis-2025** repo.
 
 ---
 
-## Quickstart (Rangpur HPC / local)
+## What’s inside
 
-> **Important:** Do **not** commit datasets or model `.pt` weights to your fork.
+- **Model:** `UNet2D` (BatchNorm + Dropout, bilinear upsampling).
+- **Data I/O:** Auto-detect **PNG** (preferred) or **NIfTI**; per-slice z-score; optional H/V flips; contiguous tensors.
+- **Training:** Cross-Entropy + soft Dice (DiceCE), AdamW, cosine LR, early stopping, AMP (CUDA).
+- **Evaluation:** Per-class & mean Dice/IoU; curves + JSON metrics saved under `runs/`.
+
+---
+
+## Quickstart (Rangpur HPC)
+
+> **Do not commit datasets or model weights.** Only commit code, scripts, and small artifacts (e.g. `metrics.json`, plots).
+
+### 0) Environment
 
 ```bash
-# (1) Create env
-module load python/3.10  # if on HPC; adjust per site
-python -m venv .venv && source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+cd ~/PatternAnalysis-2025/recognition/oasis_unet_cooper
+python3 -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip wheel setuptools
 
-# (2) Train (adjust paths)
-python train.py   --images_dir /home/groups/comp3710/OASIS/images   --labels_dir /home/groups/comp3710/OASIS/labels   --epochs 60 --batch_size 8 --lr 1e-3   --out_dir runs/oasis_unet_v1 --num_classes 4   --val_split 0.15 --test_split 0.15
+# PyTorch CUDA 11.8 wheels (Rangpur-friendly)
+pip install torch==2.2.2 torchvision==0.17.2 --extra-index-url https://download.pytorch.org/whl/cu118
 
-# (3) Predict on a directory of images
-python predict.py   --checkpoint runs/oasis_unet_v1/best_model.pt   --images_dir /home/groups/comp3710/OASIS/images   --out_dir runs/oasis_unet_v1/preds
+# Other deps (NumPy pinned < 2 for ABI compatibility)
+pip install -r requirements.txt --no-cache-dir
+
+# Sanity check
+python - << 'PY'
+import torch, torchvision
+print("torch", torch.__version__, "torchvision", torchvision.__version__)
+print("CUDA available:", torch.cuda.is_available())
+PY
 ```
 
-If you use SLURM, submit `scripts/train_oasis.slurm`. If your site uses PBS, adapt the script header accordingly.
+### 1) Train (SLURM)
+
+Submit the provided script (uses OASIS **PNG** paths):
+
+```bash
+sbatch scripts/train_oasis.slurm
+squeue -u $USER
+# tail the newest log:
+ls -1tr slurm_*.out | tail -1 | xargs tail -n 80 -f
+```
+
+The SLURM script trains with:
+
+```
+--images_dir /home/groups/comp3710/OASIS/keras_png_slices_train
+--labels_dir /home/groups/comp3710/OASIS/keras_png_slices_seg_train
+--epochs 60 --batch_size 8 --lr 1e-3
+--num_classes 2 --val_split 0.15 --test_split 0.15
+--out_dir runs/oasis_png_v1
+```
+
+### (Optional) Train locally (CPU/GPU)
+
+```bash
+source .venv/bin/activate
+python train.py   --images_dir /path/to/images   --labels_dir /path/to/labels   --epochs 60 --batch_size 8 --lr 1e-3   --num_classes 2 --out_dir runs/oasis_png_v1
+```
+
+### 2) Inference (PNG or NIfTI)
+
+```bash
+source .venv/bin/activate
+python predict.py   --checkpoint runs/oasis_png_v1/best.pt   --images_dir /home/groups/comp3710/OASIS/keras_png_slices_validate   --out_dir runs/oasis_png_v1/preds_val   --num_classes 2
+```
+
+- Produces mask PNGs alongside inputs (suffix `_pred.png`).
+- `predict.py` auto-detects PNG or NIfTI inputs.
 
 ---
 
-## Repo structure (required by task)
-- `modules.py` – model components (2D U‑Net + building blocks)
-- `dataset.py` – NIfTI 2D slice dataset + transforms
-- `train.py` – training/validation/testing loop, metrics & plots
-- `predict.py` – inference on a folder of images; saves predicted masks
-- `utils.py` – dice/iou metrics, plotting, seed utilities
-- `requirements.txt` – pinned major deps
-- `scripts/train_oasis.slurm` – example SLURM batch (adapt for PBS if needed)
-- `README.md` – this file
+## Repo layout
+
+- `modules.py` — U-Net building blocks + `UNet2D`
+- `dataset.py` — Auto-detect **PNG/NIfTI**; z-score; safe flips; contiguous tensors
+- `train.py` — Seeded split (train/val/test via `Subset`), DiceCE loss, AdamW + cosine LR, early stopping; saves `best.pt`, `history.json`, `metrics.json`, and plots
+- `predict.py` — Inference on a folder of PNG/NIfTI images → PNG masks
+- `utils.py` — Dice/IoU, plotting (**Agg** backend for headless), seeding, JSON helpers
+- `requirements.txt` — **No torch/vision here** (install separately as above)
+- `scripts/train_oasis.slurm` — Rangpur A100 example config
+- `README.md` — this file
 
 ---
 
-## Reproducibility
-- Deterministic seeds set where feasible (`--seed`).
-- Check and record: PyTorch, CUDA, cuDNN versions; GPU model/VRAM in your README results section.
-- Save `args.json` and `metrics.json` in the run folder.
+## Reproducibility & Logging
+
+- **Seeds:** `--seed` (default `1337`); cuDNN deterministic where feasible.
+- **Artifacts (under `runs/oasis_png_v1/`):**
+  - `args.json` — full CLI config
+  - `best.pt` — best model weights (by val mean Dice)
+  - `history.json` — losses & dice history
+  - `metrics.json` — final test metrics
+  - `training_curves_loss.png`, `training_curves_dice.png` — generated by `utils.plot_curves`
+
+**`metrics.json` schema (example):**
+
+```json
+{
+  "best_val_mean_dice": 0.923,
+  "test_loss": 0.12,
+  "test_dice_per_class": [0.996, 0.912],
+  "test_dice_mean": 0.954,
+  "test_iou_per_class": [0.992, 0.838],
+  "test_iou_mean": 0.915
+}
+```
+
+Classes are `[background, brain]` for PNG OASIS (2 classes).
 
 ---
 
-## Results to include in the report
-- Mean Dice and per‑class Dice on test set (target: **≥ 0.90** for all classes).
-- Loss and Dice curves (`runs/*/training_curves.png`).
-- A couple of visual examples of predicted masks vs ground truth.
+## Results to report
+
+- **Per-class Dice** and **mean Dice** on the **test** split (target for Easy: **both classes ≥ 0.90**).
+- **Loss & Dice curves** (saved under `runs/...`).
+- 2–4 **qualitative examples**: input slice, GT mask, predicted mask.
+
+> Only claim “all labels ≥ 0.90” after verifying `test_dice_per_class` in `metrics.json`.
+
+**Results table (fill after training):**
+
+| Split | Dice (bg) | Dice (fg/brain) | Mean Dice |
+|:----:|:---------:|:----------------:|:---------:|
+| Val  |   `__`    |       `__`       |   `__`    |
+| Test |   `__`    |       `__`       |   `__`    |
+
+Best epoch: `__` with **Val Dice (mean)**: `__`
 
 ---
 
-## Notes
-- If time permits, consider extending to **HipMRI 2D** with Improved U-Net/CAN to reach Normal difficulty (update `--num_classes`, paths, and label handling).
-- Keep commits small with meaningful messages (design, dataset, trainer, first pass results, tuning, final polish).
+## Troubleshooting
+
+- **NumPy ABI error:** ensure `numpy<2` (already pinned in `requirements.txt`).
+- **CUDA not used:** verify PyTorch CUDA wheels (`torch==2.2.2`, `torchvision==0.17.2` with `+cu118`).
+- **Indent/line-ending issues on HPC:** ensure `.py` files use **spaces** (no tabs) and **LF** line endings.
+- **OOM:** lower `--batch_size` (e.g., 8 → 4 → 2).
+
+---
+
+## Stretch goal (Normal difficulty)
+
+Add a second folder (e.g., `recognition/hipmri_unet_plus/`) that:
+- Loads **HipMRI** 2D,
+- Uses an improved U-Net (e.g., residual/attention/deep supervision),
+- Includes a separate Slurm script, metrics, and results.
+
+---
+
+## Checklist (for PR)
+
+- [ ] End-to-end run on Rangpur with provided commands  
+- [ ] `metrics.json` included and referenced here  
+- [ ] Curves + 2–4 example predictions shown  
+- [ ] No data/weights committed  
+- [ ] README matches the actual commands/paths used
