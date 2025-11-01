@@ -1,6 +1,12 @@
+n/n# Backup files
+*.bak*
 
-# Slurm logs
-slurm_*.out
+# Local env
+.venv/
+
+#backups
+*.bak*
+*.bak.*
 
 # Slurm logs
 slurm_*.out
