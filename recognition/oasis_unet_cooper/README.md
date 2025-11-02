@@ -1,123 +1,146 @@
 # OASIS 2D Brain Segmentation with U-Net (PyTorch)
 
-**Goal (Easy):** Segment the OASIS **2D PNG slices** with a 2D U-Net so that **all labels achieve Dice ≥ 0.90 on the held-out test split** (classes: background, brain).
+**Goal (Easy difficulty):** Segment the OASIS dataset with a 2D U-Net so that **all labels achieve Dice ≥ 0.90 on the held-out test split.
 
-This folder is designed to live at:  
-`recognition/oasis_unet_cooper/` inside the **PatternAnalysis-2025** repo.
+This folder is designed to live under:  
+`recognition` in the `PatternAnalysis-2025` repo
 
 ---
 
 ## What’s inside
 
-- **Model:** `UNet2D` (BatchNorm + Dropout, bilinear upsampling).
-- **Data I/O:** Auto-detect **PNG** (preferred) or **NIfTI**; per-slice z-score; optional H/V flips; contiguous tensors.
-- **Training:** Cross-Entropy + soft Dice (DiceCE), AdamW, cosine LR, early stopping, AMP (CUDA).
-- **Evaluation:** Per-class & mean Dice/IoU; curves + JSON metrics saved under `runs/`.
+- **Model:** Lightweight 2D U-Net with BatchNorm + Dropout; width configurable via `--base_ch`
+- **Data:** Works with **either** 2D PNG slices *(Keras-style OASIS export)* or NIfTI slices.
+    - PNG pairing is auto-detected: `case_XXX_slice_Y...png` <-> `seg_XXX_Y...png`. 
+- **Training:** Composite **Dice+CE** loss, AdamW, cosine LR, AMP (if CUDA), early stopping on **val Dice**.
+- **Evaluation:** Per-class & mean **Dice/IoU**; curves and JSON metrics saved under `runs/`.
 
 ---
 
 ## Quickstart (Rangpur HPC)
 
-> **Do not commit datasets or model weights.** Only commit code, scripts, and small artifacts (e.g. `metrics.json`, plots).
+> **Do not commit** datasets or model weights. (`.pt/.pth`) to the repo
 
-### 0) Environment
-
-```bash
-cd ~/PatternAnalysis-2025/recognition/oasis_unet_cooper
-python3 -m venv .venv && source .venv/bin/activate
-pip install --upgrade pip wheel setuptools
-
-# PyTorch CUDA 11.8 wheels (Rangpur-friendly)
-pip install torch==2.2.2 torchvision==0.17.2 --extra-index-url https://download.pytorch.org/whl/cu118
-
-# Other deps (NumPy pinned < 2 for ABI compatibility)
-pip install -r requirements.txt --no-cache-dir
-
-# Sanity check
-python - << 'PY'
-import torch, torchvision
-print("torch", torch.__version__, "torchvision", torchvision.__version__)
-print("CUDA available:", torch.cuda.is_available())
-PY
-```
-
-### 1) Train (SLURM)
-
-Submit the provided script (uses OASIS **PNG** paths):
+### 0) Create and activate environment
 
 ```bash
-sbatch scripts/train_oasis.slurm
-squeue -u $USER
-# tail the newest log:
-ls -1tr slurm_*.out | tail -1 | xargs tail -n 80 -f
-```
-
-The SLURM script trains with:
-
-```
---images_dir /home/groups/comp3710/OASIS/keras_png_slices_train
---labels_dir /home/groups/comp3710/OASIS/keras_png_slices_seg_train
---epochs 60 --batch_size 8 --lr 1e-3
---num_classes 2 --val_split 0.15 --test_split 0.15
---out_dir runs/oasis_png_v1
-```
-
-### (Optional) Train locally (CPU/GPU)
-
-```bash
+python -m venv .venv
 source .venv/bin/activate
-python train.py   --images_dir /path/to/images   --labels_dir /path/to/labels   --epochs 60 --batch_size 8 --lr 1e-3   --num_classes 2 --out_dir runs/oasis_png_v1
+pip install --upgrade pip
+pip install -r recognition/oasis_unet_cooper/requirements.txt
+```
+
+### 1) Train (PNG slices; 2 classes)
+
+Submit the provided script (**Rangpur** (COMP3710 shared dataset):
+
+```bash
+cd recognition/oasis_unet_cooper
+
+python train.py \
+  --images_dir /home/groups/comp3710/OASIS/keras_png_slices_train \
+  --labels_dir /home/groups/comp3710/OASIS/keras_png_slices_seg_train \
+  --epochs 60 --batch_size 8 --lr 1e-3 \
+  --out_dir runs/oasis_png_v1 \
+  --num_classes 2 \
+  --val_split 0.15 --test_split 0.15 \
+  --num_workers 4
 ```
 
 ### 2) Inference (PNG or NIfTI)
 
+predict.py loads NIfTI images then writes to PNG masks:
+
 ```bash
-source .venv/bin/activate
-python predict.py   --checkpoint runs/oasis_png_v1/best.pt   --images_dir /home/groups/comp3710/OASIS/keras_png_slices_validate   --out_dir runs/oasis_png_v1/preds_val   --num_classes 2
+python predict.py \
+  --checkpoint runs/oasis_png_v1/best.pt \
+  --images_dir /path/to/nifti_images_for_inference \
+  --out_dir runs/oasis_png_v1/preds \
+  --num_classes 2
 ```
 
-- Produces mask PNGs alongside inputs (suffix `_pred.png`).
-- `predict.py` auto-detects PNG or NIfTI inputs.
+- PNG interface can be added easily, but the included script is NIfTI-oriented
 
 ---
+
+## SLURM (Rangpur)
+
+A ready-to-use job script is included: scripts/train_oasis.slurm
+
+# submit
+```bash
+sbatch recognition/oasis_unet_cooper/scripts/train_oasis.slurm
+```
+
+# quick, smoke test (1 epoch on PNG) is also provided
+```bash
+sbatch recognition/oasis_unet_cooper/scripts/smoke_test.slurm
+```
 
 ## Repo layout
 
-- `modules.py` — U-Net building blocks + `UNet2D`
-- `dataset.py` — Auto-detect **PNG/NIfTI**; z-score; safe flips; contiguous tensors
-- `train.py` — Seeded split (train/val/test via `Subset`), DiceCE loss, AdamW + cosine LR, early stopping; saves `best.pt`, `history.json`, `metrics.json`, and plots
-- `predict.py` — Inference on a folder of PNG/NIfTI images → PNG masks
-- `utils.py` — Dice/IoU, plotting (**Agg** backend for headless), seeding, JSON helpers
-- `requirements.txt` — **No torch/vision here** (install separately as above)
-- `scripts/train_oasis.slurm` — Rangpur A100 example config
-- `README.md` — this file
+|- `modules.py` — U-Net building blocks + `UNet2D`
+|- `dataset.py` — Auto-detect **PNG/NIfTI**; z-score; safe flips; contiguous tensors
+|- `train.py` — train/val/test loop + metrics/curve
+|- `predict.py` — Inference on a folder of PNG/NIfTI images -> PNG masks
+|- `utils.py` — metrics, plots, seeding helpers
+|- `requirements.txt` — **No torch/vision here** (pinned deps, e.g. NumPy < 2 ect.)
+|- `README.md` — this file
+|- `scripts/`
+    |- `train_oasis.slurm` — SLURM JOB (comp3710 partition)
+    |- `smoke_test.slurm`  — short sanity test
 
 ---
 
-## Reproducibility & Logging
-
-- **Seeds:** `--seed` (default `1337`); cuDNN deterministic where feasible.
-- **Artifacts (under `runs/oasis_png_v1/`):**
-  - `args.json` — full CLI config
-  - `best.pt` — best model weights (by val mean Dice)
-  - `history.json` — losses & dice history
-  - `metrics.json` — final test metrics
-  - `training_curves_loss.png`, `training_curves_dice.png` — generated by `utils.plot_curves`
-
-**`metrics.json` schema (example):**
-
-```json
-{
-  "best_val_mean_dice": 0.923,
-  "test_loss": 0.12,
-  "test_dice_per_class": [0.996, 0.912],
-  "test_dice_mean": 0.954,
-  "test_iou_per_class": [0.992, 0.838],
-  "test_iou_mean": 0.915
-}
+## Results (PNG, 2 classes)
+```bash
+python train.py \
+  --images_dir /home/groups/comp3710/OASIS/keras_png_slices_train \
+  --labels_dir /home/groups/comp3710/OASIS/keras_png_slices_seg_train \
+  --epochs 1 \
+  --batch_size 2 \
+  --out_dir runs/oasis_png_smoke \
+  --num_classes 2 \
+  --val_split 0.10 \
+  --test_split 0.10
 ```
 
-Classes are `[background, brain]` for PNG OASIS (2 classes).
+# Observed metrics (example runs)
+            Run        | Test Dice (per-class)  |Test Dice (mean) | Test IoU (mean)
+ runs/oasis_png_smoke/ |    [0.9935, 0.9831]    |     0.9883      |     0.9818
+ runs/oasis_png_v1/    |   [0.99933, 0.99826]   |     0.99880     |     0.99820
+
+
+## Reproducibility & Logging
+
+- Fixed seed via `--seed` (applies to Python/NumPy/PyTorch).
+- Record environment in the PR: Python, CUDA, cuDNN, GPU model/VRAM.
+- All CLI args are captured to args.json; metrics to metrics.json.
+
+Example environment (Rangpur A100):
+```makefile
+Python 3.11
+torch 2.2.2+cu118, torchvision 0.17.2+cu118
+GPU: NVIDIA A100 40GB (CUDA 11.8)
+```
+
+Test Log:
+```json
+Test Results: {
+  "best_val_mean_dice": 0.9987865686416626,
+  "test_loss": 0.0017705535487239732,
+  "test_dice_per_class": [
+  0.9993329048156738,
+  0.998260498046875
+  ],
+  "test_dice_mean": 0.9987967014312744,
+  "test_iou_per_class": [
+  0.9989995740205672,
+  0.9973933781195532
+  ],
+  "test_iou_mean": 0.9981964760700601
+}
+```
 
 ---
 
@@ -125,43 +148,66 @@ Classes are `[background, brain]` for PNG OASIS (2 classes).
 
 - **Per-class Dice** and **mean Dice** on the **test** split (target for Easy: **both classes ≥ 0.90**).
 - **Loss & Dice curves** (saved under `runs/...`).
-- 2–4 **qualitative examples**: input slice, GT mask, predicted mask.
 
 > Only claim “all labels ≥ 0.90” after verifying `test_dice_per_class` in `metrics.json`.
 
-**Results table (fill after training):**
+**Run: `runs/oasis_png_smoke/ (PNG, 2 classes)**
 
-| Split | Dice (bg) | Dice (fg/brain) | Mean Dice |
-|:----:|:---------:|:----------------:|:---------:|
-| Val  |   `__`    |       `__`       |   `__`    |
-| Test |   `__`    |       `__`       |   `__`    |
+| Split |    Dice (bg)   |    Dice (fg/brain)    |    Mean Dice   |
+| Val   |      `__`      |          `__`         |    `0.98822`   |
+| Test  |    `0.99347`   |       `0.98306`       |    `0.98827`   |
 
-Best epoch: `__` with **Val Dice (mean)**: `__`
+Best epoch: `1` with **Val Dice (mean)**: `0.98822`
+
+**Run: `runs/oasis_png_v1/ (PNG, 2 classes)**
+
+| Split |    Dice (bg)   |    Dice (fg/brain)    |    Mean Dice   |
+| Val   |      `__`      |          `__`         |    `0.99879`   |
+| Test  |    `0.99933`   |       `0.99826`       |    `0.99880`   |
+
+Best epoch: `54` with **Val Dice (mean)**: `0.99879`
 
 ---
 
 ## Troubleshooting
 
-- **NumPy ABI error:** ensure `numpy<2` (already pinned in `requirements.txt`).
-- **CUDA not used:** verify PyTorch CUDA wheels (`torch==2.2.2`, `torchvision==0.17.2` with `+cu118`).
-- **Indent/line-ending issues on HPC:** ensure `.py` files use **spaces** (no tabs) and **LF** line endings.
-- **OOM:** lower `--batch_size` (e.g., 8 → 4 → 2).
+- **`FileNotFoundError: Missing label for ...` (PNG pairing)**
+  - Ensure the two dirs are correct and case-sensitive:
+    - Images: `/home/groups/comp3710/OASIS/keras_png_slices_train`
+    - Labels: `/home/groups/comp3710/OASIS/keras_png_slices_seg_train`
+  - Expected name pattern: `case_001_slice_0.nii.png` ↔ `seg_001_slice_0.nii.png`.
+  - Quick check:
+    ```bash
+    ls -1 /home/groups/comp3710/OASIS/keras_png_slices_seg_train | head
+    ```
+    Or from Python (inside this folder):
+    ```python
+    from dataset import _discover_pairs
+    p, m = _discover_pairs(
+        "/home/groups/comp3710/OASIS/keras_png_slices_train",
+        "/home/groups/comp3710/OASIS/keras_png_slices_seg_train"
+    )
+    print(m, len(p), p[0])
+    ```
+
+- **`CUDA available: False` on Rangpur**
+  - Run on a GPU partition via SLURM (`comp3710`, `a100`, or `a100-test`).
+  - Install the CUDA wheel before the rest:
+    ```bash
+    pip install torch==2.2.2 torchvision==0.17.2 --extra-index-url https://download.pytorch.org/whl/cu118
+    ```
+  - The provided SLURM scripts already print compiled CUDA, device count, and GPU name.
+
+- **SLURM “Memory specification cannot be satisfied”**
+  - Prefer `#SBATCH --mem-per-cpu=3G` with `#SBATCH --cpus-per-task=2..4`, or remove custom mem flags and use defaults for student queues.
+
+- **`requirements.txt: No such file or directory`**
+  - `cd recognition/oasis_unet_cooper` first, or pass the full path:
+    ```bash
+    pip install -r recognition/oasis_unet_cooper/requirements.txt
+    ```
+
+- **`ImportError: cannot import name 'NiftiSeg2DDataset'`**
+  - You likely have an outdated `dataset.py`. `git pull` and ensure the class and PNG pairing helpers are present.
 
 ---
-
-## Stretch goal (Normal difficulty)
-
-Add a second folder (e.g., `recognition/hipmri_unet_plus/`) that:
-- Loads **HipMRI** 2D,
-- Uses an improved U-Net (e.g., residual/attention/deep supervision),
-- Includes a separate Slurm script, metrics, and results.
-
----
-
-## Checklist (for PR)
-
-- [ ] End-to-end run on Rangpur with provided commands  
-- [ ] `metrics.json` included and referenced here  
-- [ ] Curves + 2–4 example predictions shown  
-- [ ] No data/weights committed  
-- [ ] README matches the actual commands/paths used
