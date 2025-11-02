@@ -106,9 +106,9 @@ python train.py \
 ```
 
 # Observed metrics (example runs)
-            Run        | Test Dice (per-class)  |Test Dice (mean) | Test IoU (mean)
- runs/oasis_png_smoke/ |    [0.9935, 0.9831]    |     0.9883      |     0.9818
- runs/oasis_png_v1/    |   [0.99933, 0.99826]   |     0.99880     |     0.99820
+            Run                   | Test Dice (per-class)  |Test Dice (mean) | Test IoU (mean)
+            runs/oasis_png_smoke/ |    [0.9935, 0.9831]    |     0.9883      |     0.9818
+            runs/oasis_png_v1/    |   [0.99933, 0.99826]   |     0.99880     |     0.99820
 
 
 ## Reproducibility & Logging
@@ -153,19 +153,19 @@ Test Results: {
 
 **Run: `runs/oasis_png_smoke/ (PNG, 2 classes)**
 
-| Split |    Dice (bg)   |    Dice (fg/brain)    |    Mean Dice   |
-| Val   |      `__`      |          `__`         |    `0.98822`   |
-| Test  |    `0.99347`   |       `0.98306`       |    `0.98827`   |
+    Split |    Dice (bg)   |    Dice (fg/brain)    |    Mean Dice
+    Val   |      `__`      |          `__`         |    `0.98822`
+    Test  |    `0.99347`   |       `0.98306`       |    `0.98827`
 
-Best epoch: `1` with **Val Dice (mean)**: `0.98822`
+    Best epoch: `1` with **Val Dice (mean)**: `0.98822`
 
 **Run: `runs/oasis_png_v1/ (PNG, 2 classes)**
 
-| Split |    Dice (bg)   |    Dice (fg/brain)    |    Mean Dice   |
-| Val   |      `__`      |          `__`         |    `0.99879`   |
-| Test  |    `0.99933`   |       `0.99826`       |    `0.99880`   |
+    | Split |    Dice (bg)   |    Dice (fg/brain)    |    Mean Dice   |
+    | Val   |      `__`      |          `__`         |    `0.99879`   |
+    | Test  |    `0.99933`   |       `0.99826`       |    `0.99880`   |
 
-Best epoch: `54` with **Val Dice (mean)**: `0.99879`
+    Best epoch: `54` with **Val Dice (mean)**: `0.99879`
 
 ---
 
