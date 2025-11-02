@@ -32,22 +32,27 @@ def soft_dice_score(pred_logits, target_onehot, eps=1e-6):
     return dice_per_class
 
 
-def iou_from_logits(pred_logits, target, num_classes: int):
+def iou_from_logits(logits: torch.Tensor,
+                    target: torch.Tensor,
+                    num_classes: int,
+                    eps: float = 1e-6) -> np.ndarray:
     """
-    target: (N,H,W) int64 class ids
-    returns: np.ndarray of shape (C,)
+    Per-class IoU from logits and integer masks.
+    Returns np.array shape (C,) with NaN for classes absent in both pred & gt.
     """
     with torch.no_grad():
-        pred = torch.argmax(pred_logits, dim=1)  # (N,H,W)
+        pred = logits.argmax(dim=1)  # (N,H,W)
         ious = []
         for c in range(num_classes):
-            p = (pred == c)
-            t = (target == c)
-            inter = (p & t).sum().item()
-            union = (p | t).sum().item()
-            ious.append(1.0 if union == 0 else inter / union)
-        return np.array(ious)
-
+            pred_c = (pred == c)
+            targ_c = (target == c)
+            inter = (pred_c & targ_c).sum().item()
+            union = (pred_c | targ_c).sum().item()
+            if union == 0:
+                ious.append(np.nan)          # ignore absent class
+            else:
+                ious.append(inter / (union + eps))
+        return np.asarray(ious, dtype=np.float32)
 
 def save_json(obj, path):
     with open(path, "w") as f:
