@@ -26,57 +26,41 @@ def _load_nifti(path):
         arr = arr[..., 0]
     return arr.astype(np.float32)
 
-def _find_label_for_image(img_basename: str, labels_dir: str):
-    """
-    Try common OASIS label name patterns.
-    e.g. case_001_slice_0.nii.png -> seg_001_slice_0.nii.png
-    And a few other sensible fallbacks.
-    """
-    b = img_basename
+# --- HipMRI mapping: *_LFOV.nii.gz (image) -> *_SEMANTIC.nii.gz (label) ---
+def _find_label_for_image(img_basename: str, labels_dir: str) -> str:
+    import os
     cands = []
-
-    # Prefix swap case_ -> seg_
-    if b.startswith("case_"):
-        cands.append(os.path.join(labels_dir, "seg_" + b[len("case_"):]))
-
-    # Same basename (if already matches)
-    cands.append(os.path.join(labels_dir, b))
-
-    # Strip .nii from name (…nii.png -> …png)
-    if b.endswith(".nii.png"):
-        cands.append(os.path.join(labels_dir, b.replace(".nii.png", ".png")))
-
-    # Common suffix variants
-    base_png = b[:-4] if b.endswith(".png") else b
-    cands.append(os.path.join(labels_dir, base_png + "_seg.png"))
-    cands.append(os.path.join(labels_dir, base_png + "_mask.png"))
-
+    if img_basename.endswith("_LFOV.nii.gz"):
+        cands.append(os.path.join(
+            labels_dir, img_basename.replace("_LFOV.nii.gz", "_SEMANTIC.nii.gz")
+        ))
+    # Fallback: identical basename
+    cands.append(os.path.join(labels_dir, img_basename))
     for p in cands:
         if os.path.exists(p):
             return p
-    raise FileNotFoundError(
-        f"Missing label for {img_basename}: tried -> " + ", ".join(cands)
-    )
+    raise FileNotFoundError(f"Missing label for {img_basename}: tried -> " + ", ".join(cands))
 
-def _discover_pairs(images_dir, labels_dir):
-    # Prefer PNGs if present
-    pngs = sorted(glob.glob(os.path.join(images_dir, "*.png")))
-    if pngs:
-        pairs = []
-        for ip in pngs:
-            b = os.path.basename(ip)
-            lp = _find_label_for_image(b, labels_dir)
-            pairs.append((ip, lp))
-        return pairs, "png"
-
-    # Else look for NIfTI
-    niis = sorted(glob.glob(os.path.join(images_dir, "*.nii"))) + \
-           sorted(glob.glob(os.path.join(images_dir, "*.nii.gz")))
-    if niis:
-        lbls = [os.path.join(labels_dir, os.path.basename(p)) for p in niis]
-        return list(zip(niis, lbls)), "nifti"
-
-    raise FileNotFoundError(f"No .png or .nii(.gz) files under {images_dir}")
+# HipMRI-aware discover_pairs that always uses the mapping helper above
+def _discover_pairs(images_dir: str, labels_dir: str):
+    import os, glob
+    nii_imgs = sorted(glob.glob(os.path.join(images_dir, "*.nii"))) + \
+               sorted(glob.glob(os.path.join(images_dir, "*.nii.gz")))
+    png_imgs = sorted(glob.glob(os.path.join(images_dir, "*.png")))
+    if nii_imgs:
+        mode = "nifti"
+        imgs = nii_imgs
+    elif png_imgs:
+        mode = "png"
+        imgs = png_imgs
+    else:
+        raise FileNotFoundError(f"No images found in {images_dir}")
+    pairs = []
+    for ip in imgs:
+        b = os.path.basename(ip)
+        lp = _find_label_for_image(b, labels_dir)
+        pairs.append((ip, lp))
+    return pairs, mode
 
 def _normalize_img(x: np.ndarray, eps: float = 1e-6):
     x = x.astype(np.float32)
