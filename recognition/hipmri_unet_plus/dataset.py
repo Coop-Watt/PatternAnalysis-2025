@@ -158,4 +158,35 @@ class NiftiSeg2DDataset(Dataset):
         else:
             mask_t = torch.from_numpy(np.ascontiguousarray(lbl)).long()
 
-        return img_t, mask_t
+        return img_t, mask_t# --- HipMRI mapping override: *_LFOV.nii.gz (image) -> *_SEMANTIC.nii.gz (label) ---
+def _find_label_for_image(img_basename: str, labels_dir: str) -> str:
+    import os
+    candidates = []
+    if img_basename.endwith("_LFOV.nii.gz"):
+        candidates.append(os.path.join(labels_dir,
+                                       img_basename.replace("LFOV.nii.gz", "_SEMANTIC.nii.gz")))
+    # Fallback: identical basename (only if labels really share the same name)
+    candidates.append(os.path.join(labels_dir, img_basename))
+
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(
+        f"Missing label for {img_basename}: tried -> " + ",".join(candidates)
+    )
+# --- HipMRI mapping override: *_LFOV.nii.gz (image) -> *_SEMANTIC.nii.gz (label) ---
+def _find_label_for_image(img_basename: str, labels_dir: str) -> str:
+    import os
+    candidates = []
+    if img_basename.endswith("_LFOV.nii.gz"):
+        candidates.append(os.path.join(labels_dir,
+                                       img_basename.replace("_LFOV.nii.gz", "_SEMANTIC.nii.gz")))
+    # Fallback: identical basename (only if labels really share the same name)
+    candidates.append(os.path.join(labels_dir, img_basename))
+
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(
+        f"Missing label for {img_basename}: tried -> " + ",".join(candidates)
+    )
