@@ -54,7 +54,7 @@ def evaluate(model, loader, device, num_classes):
     n = len(loader.dataset)
     loss_avg = total_loss / max(n, 1)
     dice_mean = np.mean(np.vstack(dice_accum), axis=0) if dice_accum else np.zeros(num_classes)
-    iou_mean  = np.mean(np.vstack(iou_accum),  axis=0) if iou_accum  else np.zeros(num_classes)
+    iou_mean = np.nanmean(np.vstack(iou_accum), axis=0) if iou_accum else np.zeros(num_classes)
     return loss_avg, dice_mean, iou_mean
 
 def main():
@@ -162,7 +162,7 @@ def main():
 
         # Validation
         val_loss, val_dice_pc, _ = evaluate(model, val_ld, device, args.num_classes)
-        val_dice_mean = float(val_dice_pc.mean())
+        val_dice_mean = float(np.mean(val_dice_pc[1:])) if len(val_dice_pc) > 1 else float(val_dice_pc.mean())
         history["val_loss"].append(val_loss)
         history["val_dice_mean"].append(val_dice_mean)
         history["val_dice_per_class"].append(val_dice_pc.tolist())
@@ -198,8 +198,11 @@ def main():
         "test_loss": float(test_loss),
         "test_dice_per_class": test_dice_pc.tolist(),
         "test_dice_mean": float(test_dice_pc.mean()),
+        "test_dice_mean_fg": float(np.mean(test_dice_pc[1:])) if len(test_dice_pc) > 1 else float(test_dice_pc.mean()),
         "test_iou_per_class": test_iou_pc.tolist(),
-        "test_iou_mean": float(test_iou_pc.mean())
+        "test_iou_mean": float(np.nanmean(test_iou_pc)),
+        "test_iou_mean_fg": float(np.nanmean(test_iou_pc[1:])) if len(test_iou_pc) > 1 else float(
+            np.nanmean(test_iou_pc)),
     }
     save_json(results, os.path.join(args.out_dir, "metrics.json"))
     print("Test Results:", json.dumps(results, indent=2))
