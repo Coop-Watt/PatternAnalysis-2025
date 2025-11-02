@@ -1,0 +1,6 @@
+numpy<2
+Pillow>=10.0.0
+nibabel==5.2.1
+tqdm==4.66.5
+matplotlib==3.8.4
+scikit-image==0.22.0

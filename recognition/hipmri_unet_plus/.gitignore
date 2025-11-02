@@ -1,0 +1,57 @@
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*.$py.class
+.mypy_cache/
+.pytest_cache/
+.cache/
+
+# --- Virtual envs / tooling ---
+.venv/
+venv/
+env/
+.env
+.env.*
+.python-version
+
+# --- Build / packaging ---
+build/
+dist/
+*.egg-info/
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.code-workspace
+
+# --- Logs / SLURM output ---
+*.log
+slurm_*.out
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+
+# --- Model artifacts ---
+*.pt
+*.pth
+*.onnx
+
+# --- Experiment outputs ---
+# Ignore all of runs/, but allow selected small artifacts for the PR
+runs/**
+!runs/**/metrics.json
+!runs/**/training_curves_*.png
+
+# --- Large data files you should never commit (local only; Rangpur uses shared paths) ---
+*.nii
+*.nii.gz
+
+# --- Temporary / misc ---
+tmp/
+temp/
+*.swp
+*.swo
