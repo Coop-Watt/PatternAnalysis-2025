@@ -34,15 +34,18 @@ def soft_dice_score(pred_logits, target_onehot, eps=1e-6):
 
 @torch.no_grad()
 def iou_from_logits(logits: torch.Tensor, target: torch.Tensor, num_classes: int):
-    # logits: (N,C,H,W), target: (N,H,W)
-    preds = logits.argmax(dim=1)
+    """
+    Per-class IoU. If a class is absent in BOTH pred and target (union=0), return NaN for that class.
+    Means should be computed with np.nanmean to ignore absent classes.
+    """
+    preds = logits.argmax(dim=1)  # (N,H,W)
     ious = []
     for c in range(num_classes):
         p = (preds == c)
         t = (target == c)
         inter = (p & t).sum().float()
         union = (p | t).sum().float()
-        if union == 0:
+        if union.item() == 0:
             ious.append(torch.tensor(float('nan'), device=logits.device))
         else:
             ious.append(inter / union)

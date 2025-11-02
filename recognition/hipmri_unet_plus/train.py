@@ -81,6 +81,9 @@ def main():
 
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    class_weights = torch.tensor([0.1, 1, 1, 1, 1, 1], dtype=torch.float32, device=device)
+    criterion = DiceCELoss(num_classes=args.num_classes, dice_weight=0.5, ce_weight=0.5)
+    criterion.ce = nn.CrossEntropyLoss(weight=class_weights)
 
     # ---- Deterministic split into train/val/test using indices ----
     base_eval = NiftiSeg2DDataset(args.images_dir, args.labels_dir,
@@ -138,6 +141,8 @@ def main():
         for imgs, masks in pbar:
             imgs = imgs.to(device, non_blocking=True)
             masks = masks.to(device, non_blocking=True)
+            if (masks > 0).sum().item() == 0:
+                continue
 
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
